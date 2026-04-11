@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SG Analyst - Scratch</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f1f5f9; -webkit-tap-highlight-color: transparent; }
+        .card { background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .active-lie { background-color: #1d4ed8 !important; color: white !important; font-weight: 800; }
+        button { cursor: pointer; touch-action: manipulation; border: none; }
+        .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    </style>
+</head>
+<body class="p-4 font-sans text-slate-800">
+
+    <div class="max-w-md mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-xl font-black text-blue-700 tracking-tighter uppercase">SG Analytics - Scratch</h1>
+                <p id="h-label" class="text-[10px] font-bold text-slate-400 uppercase">Hole 1</p>
+            </div>
+            <div class="flex bg-slate-200 p-1 rounded-lg">
+                <button onclick="goView('entry')" id="nav-entry" class="text-[10px] font-bold px-4 py-2 rounded-md bg-white">ENTRY</button>
+                <button onclick="goView('trends')" id="nav-trends" class="text-[10px] font-bold px-4 py-2 rounded-md">TRENDS</button>
+            </div>
+        </div>
+
+        <div id="v-entry">
+            <div class="card p-6 mb-4">
+                <div class="grid grid-cols-3 gap-2 mb-4">
+                    <button onclick="setL('Tee')" id="l-Tee" class="l-btn active-lie bg-slate-100 p-3 rounded-xl text-sm font-bold">Tee</button>
+                    <button onclick="setL('Fairway')" id="l-Fairway" class="l-btn bg-slate-100 p-3 rounded-xl text-sm font-bold">Fairway</button>
+                    <button onclick="setL('Rough')" id="l-Rough" class="l-btn bg-slate-100 p-3 rounded-xl text-sm font-bold">Rough</button>
+                    <button onclick="setL('Sand')" id="l-Sand" class="l-btn bg-slate-100 p-3 rounded-xl text-sm font-bold">Sand</button>
+                    <button onclick="setL('Green')" id="l-Green" class="l-btn bg-slate-100 p-3 rounded-xl col-span-2 text-[10px] uppercase font-bold tracking-widest">Green (Feet)</button>
+                </div>
+
+                <input id="d-in" type="number" inputmode="numeric" placeholder="Distance" class="w-full text-4xl font-black border-b-4 border-slate-100 outline-none focus:border-blue-500 py-2 mb-6 text-center">
+                
+                <div class="space-y-3">
+                    <div class="flex gap-2">
+                        <button onclick="doRecord()" class="flex-[4] bg-blue-700 text-white py-5 rounded-2xl font-black text-lg shadow-lg uppercase active:bg-blue-800">Record Shot</button>
+                        <button onclick="doUndo()" class="flex-1 bg-slate-200 text-slate-600 flex items-center justify-center rounded-2xl font-bold">Undo</button>
+                    </div>
+                    <button onclick="doHoled()" class="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase shadow-md active:bg-emerald-700">✓ Ball is Holed</button>
+                </div>
+            </div>
+
+            <div id="s-list" class="space-y-2 pb-24"></div>
+            <button onclick="doSave()" id="s-btn" class="hidden fixed bottom-6 left-4 right-4 max-w-md mx-auto bg-emerald-700 text-white py-4 rounded-2xl font-black uppercase shadow-2xl">Save Round</button>
+        </div>
+
+        <div id="v-trends" class="hidden">
+            <div class="card p-4 mb-4"><canvas id="main-chart"></canvas></div>
+            <div id="roadmap-box" class="card p-5 bg-blue-900 text-white"></div>
+            <button onclick="doWipe()" class="w-full text-[10px] font-bold text-slate-400 uppercase py-10 tracking-widest">Wipe All Data</button>
+        </div>
+    </div>
+
+    <script>
+        var shots = [];
+        var lie = 'Tee';
+        var hole = 1;
+        var chart = null;
+        var expandedHole = null;
+
+        // SCRATCH BASELINE: More aggressive expectations
+        var table = {
+            'Tee': { 500:4.1, 400:3.9, 350:3.8, 200:3.1, 150:2.9, 0:0 },
+            'Fairway': { 500:4.0, 400:3.7, 300:3.4, 200:3.1, 150:2.9, 100:2.7, 50:2.5, 20:2.3, 0:0 },
+            'Rough': { 500:4.2, 400:3.9, 300:3.6, 200:3.3, 150:3.1, 100:2.9, 50:2.7, 20:2.5, 0:0 },
+            'Sand': { 100:3.3, 50:3.0, 30:2.8, 20:2.6, 10:2.4, 0:0 },
+            'Green': { 60:2.1, 30:1.9, 20:1.75, 10:1.45, 5:1.15, 3:1.05, 1:1.01, 0:0 }
+        };
+
+        function goView(v) {
+            document.getElementById('v-entry').classList.toggle('hidden', v !== 'entry');
+            document.getElementById('v-trends').classList.toggle('hidden', v !== 'trends');
+            document.getElementById('nav-entry').classList.toggle('bg-white', v === 'entry');
+            document.getElementById('nav-trends').classList.toggle('bg-white', v === 'trends');
+            if (v === 'trends') renderChart();
+            else document.getElementById('h-label').innerText = 'Hole ' + hole;
+        }
+
+        function toggleHole(n) {
+            if (n === hole) return;
+            expandedHole = (expandedHole === n) ? null : n;
+            ui();
+        }
+
+        function setL(l) {
+            lie = l;
+            var btns = document.getElementsByClassName('l-btn');
+            for(var i=0; i<btns.length; i++) { btns[i].classList.remove('active-lie'); }
+            document.getElementById('l-' + l).classList.add('active-lie');
+        }
+
+        function getVal(l, d) {
+            var dta = table[l];
+            var ks = Object.keys(dta).map(Number).sort((a,b)=>b-a);
+            if (d >= ks[0]) return dta[ks[0]];
+            if (d <= ks[ks.length-1]) return dta[ks[ks.length-1]];
+            for (var i=0; i<ks.length-1; i++) {
+                if (d <= ks[i] && d >= ks[i+1]) {
+                    return dta[ks[i+1]] + (dta[ks[i]]-dta[ks[i+1]]) * (d-ks[i+1]) / (ks[i]-ks[i+1]);
+                }
+            }
+            return 2.5;
+        }
+
+        function doRecord() {
+            var inp = document.getElementById('d-in');
+            if (!inp.value) return;
+            var d = parseFloat(inp.value);
+            var ev = getVal(lie, d);
+            var ct = (lie === 'Tee') ? 'OTT' : (lie === 'Green' ? 'PUT' : (d <= 100 ? 'SHG' : 'APP'));
+            if (shots.length > 0) {
+                var prev = shots[shots.length-1];
+                if (!prev.holed) prev.sg = prev.ev - ev - 1;
+            }
+            shots.push({ lie: lie, dist: d, ev: ev, cat: ct, sg: null, hole: hole, holed: false });
+            inp.value = '';
+            document.getElementById('s-btn').classList.remove('hidden');
+            ui();
+        }
+
+        function doHoled() {
+            if (shots.length === 0) return;
+            var last = shots[shots.length-1];
+            if (last.holed) return;
+            last.sg = last.ev - 1; 
+            last.holed = true;
+            hole++;
+            document.getElementById('h-label').innerText = 'Hole ' + hole;
+            setL('Tee');
+            expandedHole = null;
+            ui();
+        }
+
+        function doUndo() {
+            if (shots.length === 0) return;
+            var p = shots.pop();
+            if (p.holed) {
+                hole--;
+                document.getElementById('h-label').innerText = 'Hole ' + hole;
+            }
+            if (shots.length > 0) shots[shots.length-1].sg = null;
+            ui();
+        }
+
+        function ui() {
+            var list = document.getElementById('s-list');
+            var html = '';
+            var holeData = {};
+            shots.forEach(s => {
+                if (!holeData[s.hole]) holeData[s.hole] = { shots: [], totalSG: 0 };
+                holeData[s.hole].shots.push(s);
+                if (s.sg !== null) holeData[s.hole].totalSG += s.sg;
+            });
+            Object.keys(holeData).forEach(hNum => {
+                var h = holeData[hNum];
+                var n = parseInt(hNum);
+                var isExpanded = (n === hole || n === expandedHole);
+                if (isExpanded) {
+                    var label = (n === hole) ? 'Hole ' + hNum + ' (Active)' : 'Hole ' + hNum + ' (Review)';
+                    html += '<div onclick="toggleHole('+n+')" class="text-[10px] font-bold text-blue-500 uppercase mt-6 mb-2 tracking-widest cursor-pointer">'+label+' ↑</div>';
+                    h.shots.forEach(s => {
+                        var isPos = s.sg > 0;
+                        var color = isPos ? 'text-emerald-600' : (s.sg < 0 ? 'text-rose-500' : 'text-slate-400');
+                        var sgText = s.sg !== null ? (isPos ? '+' : '') + s.sg.toFixed(2) : '--';
+                        var hb = s.holed ? '<span class="ml-2 bg-emerald-100 text-emerald-700 text-[8px] px-1.5 py-0.5 rounded font-black uppercase">Holed</span>' : '';
+                        html += '<div class="card p-4 flex justify-between items-center text-sm mb-1.5 border-l-4 ' + (n === hole ? 'border-blue-500' : 'border-slate-300') + '">' +
+                            '<span><b class="text-blue-700 text-[10px] w-8 inline-block font-black uppercase">' + s.cat + '</b> ' + s.lie + ' <span class="text-slate-400 ml-1">(' + s.dist + (s.lie==='Green'?'ft':'y') + ')</span>' + hb + '</span>' +
+                            '<span class="font-black font-mono ' + color + '">' + sgText + '</span></div>';
+                    });
+                } else {
+                    var totalSG = h.totalSG;
+                    var color = totalSG > 0 ? 'text-emerald-600' : (totalSG < 0 ? 'text-rose-500' : 'text-slate-400');
+                    html += '<div onclick="toggleHole('+n+')" class="flex justify-between items-center bg-white border border-slate-200 px-4 py-3 rounded-xl mt-2 cursor-pointer shadow-sm hover:bg-slate-50">' +
+                        '<span class="text-[10px] font-bold text-slate-500 uppercase">Hole ' + hNum + ' Review</span>' +
+                        '<span class="text-xs font-black ' + color + '">SG: ' + (totalSG > 0 ? '+' : '') + totalSG.toFixed(2) + '</span>' +
+                        '</div>';
+                }
+            });
+            list.innerHTML = html;
+            if (holeData[hole]) window.scrollTo(0, document.body.scrollHeight);
+        }
+
+        function doSave() {
+            var h = JSON.parse(localStorage.getItem('sg_scratch_final') || '[]');
+            var t = { OTT:0, APP:0, SHG:0, PUT:0 };
+            shots.forEach(s => { if(s.sg !== null) t[s.cat] += s.sg; });
+            h.push(t);
+            localStorage.setItem('sg_scratch_final', JSON.stringify(h.slice(-20)));
+            shots = []; hole = 1; expandedHole = null;
+            document.getElementById('h-label').innerText = 'Hole 1';
+            document.getElementById('s-btn').classList.add('hidden');
+            ui();
+            alert("Round Logged!");
+        }
+
+        function renderChart() {
+            var h = JSON.parse(localStorage.getItem('sg_scratch_final') || '[]');
+            var count = h.length;
+            if (count === 0) return;
+            var avg = { OTT:0, APP:0, SHG:0, PUT:0 };
+            h.forEach(r => { avg.OTT += r.OTT; avg.APP += r.APP; avg.SHG += r.SHG; avg.PUT += r.PUT; });
+            avg.OTT /= count; avg.APP /= count; avg.SHG /= count; avg.PUT /= count;
+            document.getElementById('h-label').innerText = 'Scratch Baseline (' + count + ' Rds)';
+            var ctx = document.getElementById('main-chart').getContext('2d');
+            if (chart) chart.destroy();
+            var cats = ['OTT', 'APP', 'SHG', 'PUT'];
+            var vals = [avg.OTT, avg.APP, avg.SHG, avg.PUT];
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Tee', 'Appr', 'Short', 'Putt'],
+                    datasets: [{ data: vals, backgroundColor: vals.map(v => v >= 0 ? '#10b981' : '#f43f5e') }]
+                },
+                options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+            var worst = cats.reduce((a, b) => avg[a] < avg[b] ? a : b);
+            var names = { OTT:'Driving', APP:'Irons', SHG:'Wedges', PUT:'Putting' };
+            var toScratch = (0.0 - avg[worst]).toFixed(2);
+            var toElite = (1.0 - avg[worst]).toFixed(2);
+            document.getElementById('roadmap-box').innerHTML = 
+                '<p class="text-lg font-black uppercase tracking-tight">Main Leak: ' + names[worst] + '</p>' +
+                '<div class="grid grid-cols-2 gap-4 mt-2">' +
+                    '<div><p class="text-[8px] opacity-70 uppercase font-bold">Gain to Scratch</p><p class="text-xl font-black">+' + toScratch + '</p></div>' +
+                    '<div><p class="text-[8px] opacity-70 uppercase font-bold">Gain to +4 Elite</p><p class="text-xl font-black">+' + toElite + '</p></div>' +
+                '</div>';
+        }
+
+        function doWipe() { if(confirm("Clear?")) { localStorage.removeItem('sg_scratch_final'); location.reload(); } }
+    </script>
+</body>
+</html>
